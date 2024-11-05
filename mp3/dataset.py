@@ -137,20 +137,18 @@ class CocoDataset(Dataset):
         resize_factor = None
         
         valid_idx = [False if b[2] < 1 or b[3] < 1 else True for b in bboxes]
-        anno_bboxes = bboxes[valid_idx]
+        bboxes = bboxes[valid_idx]
         cls = cls[valid_idx]
         is_crowd = is_crowd[valid_idx]
 
-        # transform from [x, y, w, h] to [x1, y1, x2, y2]
-        anno_bboxes[:, 2] = anno_bboxes[:, 0] + anno_bboxes[:, 2]
-        anno_bboxes[:, 3] = anno_bboxes[:, 1] + anno_bboxes[:, 3]
+        # 转换边界框格式
+        bboxes[:, 2] = bboxes[:, 0] + bboxes[:, 2]
+        bboxes[:, 3] = bboxes[:, 1] + bboxes[:, 3]
 
-        if self.transform:
-            image = np.asarray(image, dtype=np.float32) / 255
-            image, anno_bboxes, cls, is_crowd, image_id, resize_factor = self.transform([image, anno_bboxes, cls[..., np.newaxis], is_crowd, image_id])
+        # 将图像转换为 numpy 数组，并归一化到 [0, 1]
+        image = np.asarray(image, dtype=np.float32) / 255.0
 
-
-        return image, anno_bboxes, cls, is_crowd, image_id, resize_factor
+        return image, bboxes, cls, is_crowd, image_id, resize_factor
 
     def __getitem__(self, index):
         """
@@ -163,9 +161,12 @@ class CocoDataset(Dataset):
             is_crowd: (N) tensor of booleans indicating whether the bounding box is a crowd
         """
         image, bboxes, cls, is_crowd, image_id, resize_factor = self._get_annotation(index)
-        if self.split == 'train' and self.augment is not None:
-            image, bboxes, cls, is_crowd, image_id = self.augment([image, bboxes, cls, is_crowd, image_id])
+        f self.split == 'train' and self.augment is not None:
+        image, bboxes, cls, is_crowd, image_id = self.augment([image, bboxes, cls, is_crowd, image_id])
 
+        # 应用 transform（Normalizer 和 Resizer）
+        if self.transform:
+            image, bboxes, cls, is_crowd, image_id, resize_factor = self.transform([image, bboxes, cls, is_crowd, image_id])
 
         bboxes = bboxes[is_crowd == 0, :]
         cls = cls[is_crowd == 0]
