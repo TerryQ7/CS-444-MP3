@@ -21,8 +21,48 @@ import skimage.color
 import skimage
 from absl import app, flags
 
+import torchvision.transforms.functional as F
+import torchvision.transforms as tv_transforms
+
 FLAGS = flags.FLAGS
 flags.DEFINE_string('coco_dir', './coco-animal', 'Directory with coco data')
+
+class Augmenter(object):
+    def __init__(self, flip_prob=0.5, scale_range=(0.8, 1.2), color_jitter_params=None):
+        self.flip_prob = flip_prob
+        self.scale_range = scale_range
+        if color_jitter_params is None:
+            self.color_jitter = tv_transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.02)
+        else:
+            self.color_jitter = tv_transforms.ColorJitter(**color_jitter_params)
+
+    def __call__(self, sample):
+        image, bboxes, cls, is_crowd, image_id = sample
+        # 转换为 PIL Image
+        image = Image.fromarray((image * 255).astype(np.uint8))
+
+        # 颜色扰动
+        image = self.color_jitter(image)
+
+        # 随机水平翻转
+        if random.random() < self.flip_prob:
+            image = F.hflip(image)
+            width = image.width
+            # 调整边界框
+            bboxes[:, [0, 2]] = width - bboxes[:, [2, 0]]
+
+        # 随机缩放
+        scale_factor = random.uniform(*self.scale_range)
+        new_width = int(image.width * scale_factor)
+        new_height = int(image.height * scale_factor)
+        image = image.resize((new_width, new_height), Image.BILINEAR)
+        bboxes *= scale_factor
+
+        # 将图像转换回 numpy 数组
+        image = np.asarray(image).astype(np.float32) / 255.0
+
+        return [image, bboxes, cls, is_crowd, image_id]
+
 
 class CocoDataset(Dataset):
     def __init__(self, split='train', min_sizes=[800], 
@@ -48,6 +88,22 @@ class CocoDataset(Dataset):
         self.min_sizes = min_sizes
         self.transform = transform
         self.preload_images = preload_images
+
+        self.split = split  # 添加这一行，以便在 __getitem__ 中判断
+        
+        # 定义数据增强变换
+        if split == 'train':
+            self.augment = Augmenter()
+        else:
+            self.augment = None
+
+        # 如果没有传入 transform，则使用默认的
+        if transform is None:
+            self.transform = transforms.Compose([Normalizer(), Resizer()])
+        else:
+            self.transform = transform
+
+
         if self.preload_images:
             logging.info(f'Preloading {split} Images Strings into memory')
             self.image_strings = []
@@ -107,6 +163,9 @@ class CocoDataset(Dataset):
             is_crowd: (N) tensor of booleans indicating whether the bounding box is a crowd
         """
         image, bboxes, cls, is_crowd, image_id, resize_factor = self._get_annotation(index)
+        if self.split == 'train' and self.augment is not None:
+            image, bboxes, cls, is_crowd, image_id = self.augment([image, bboxes, cls, is_crowd, image_id])
+
 
         bboxes = bboxes[is_crowd == 0, :]
         cls = cls[is_crowd == 0]

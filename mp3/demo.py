@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch.optim.lr_scheduler import LinearLR, MultiStepLR, ChainedScheduler
 import torchvision
 from torch.utils.data import DataLoader
 from network import RetinaNet
@@ -71,13 +72,29 @@ def main(_):
 
 
     writer = SummaryWriter(FLAGS.output_dir, max_queue=1000, flush_secs=120)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=FLAGS.lr, 
+    #                             momentum=FLAGS.momentum, 
+    #                             weight_decay=FLAGS.weight_decay)
+    
+    # milestones = [int(x) for x in FLAGS.lr_step]
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(
+    #     optimizer, milestones=milestones, gamma=0.1)
+    
+    # optimizer.zero_grad()
+    # dataloader_iter = None
+
     optimizer = torch.optim.SGD(model.parameters(), lr=FLAGS.lr, 
                                 momentum=FLAGS.momentum, 
                                 weight_decay=FLAGS.weight_decay)
     
+    warmup_iters = 2000
+    warmup_scheduler = LinearLR(optimizer, start_factor=0.0, end_factor=1.0, total_iters=warmup_iters)
+    
     milestones = [int(x) for x in FLAGS.lr_step]
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(
+    main_scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=milestones, gamma=0.1)
+    
+    scheduler = ChainedScheduler([warmup_scheduler, main_scheduler])
     
     optimizer.zero_grad()
     dataloader_iter = None
@@ -127,7 +144,8 @@ def main(_):
         scheduler.step()
 
         # Some logging
-        lr = scheduler.get_last_lr()[0]
+        # lr = scheduler.get_last_lr()[0]
+        lr = optimizer.param_groups[0]['lr']
         total_loss_np.append(total_loss.item())
         cls_loss_np.append(cls_loss.item())
         bbox_loss_np.append(bbox_loss.item())
