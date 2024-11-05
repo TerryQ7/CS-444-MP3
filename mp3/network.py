@@ -59,6 +59,22 @@ class Anchors(nn.Module):
         aspect_ratio = h/w
         """
         super(Anchors, self).__init__()
+        self.stride = stride
+        self.anchor_offsets = []
+
+        # Precompute anchor offsets for all combinations of sizes and aspect ratios
+        for size in sizes:
+            for aspect_ratio in aspect_ratios:
+                w = size * stride / math.sqrt(aspect_ratio)
+                h = size * stride * math.sqrt(aspect_ratio)
+                x1_offset = -w / 2
+                y1_offset = -h / 2
+                x2_offset = w / 2
+                y2_offset = h / 2
+                self.anchor_offsets.append([x1_offset, y1_offset, x2_offset, y2_offset])
+
+        # Convert the list to a tensor of shape (A, 4)
+        self.anchor_offsets = torch.tensor(self.anchor_offsets)
 
     def forward(self, x):
         """
@@ -82,6 +98,31 @@ class Anchors(nn.Module):
             Your final code should be fully verterized and not have any for loops. 
             Also make sure that when you create a tensor you put it on the same device that x is on.
         """
+
+        B, C, H, W = x.shape
+        device = x.device
+        stride = self.stride
+        A = self.anchor_offsets.shape[0]  # Number of anchor types
+
+        # Generate grid of center positions
+        shift_x = torch.arange(W, device=device) * stride
+        shift_y = torch.arange(H, device=device) * stride
+        shift_y, shift_x = torch.meshgrid(shift_y, shift_x)
+
+        # Stack shifts to create shifts of shape (H, W, 4)
+        shifts = torch.stack((shift_x, shift_y, shift_x, shift_y), dim=-1).unsqueeze(2)  # (H, W, 1, 4)
+
+        # Expand anchor offsets to match shifts dimensions
+        anchor_offsets = self.anchor_offsets.to(device).unsqueeze(0).unsqueeze(0)  # (1, 1, A, 4)
+
+        # Compute anchors by adding shifts and anchor offsets
+        anchors = shifts + anchor_offsets  # (H, W, A, 4)
+
+        # Reshape and permute to get anchors of shape (A*4, H, W)
+        anchors = anchors.view(H, W, -1).permute(2, 0, 1).contiguous()
+
+        # Repeat anchors across the batch dimension
+        anchors = anchors.unsqueeze(0).repeat(B, 1, 1, 1)  # (B, A*4, H, W)
 
         return anchors
 

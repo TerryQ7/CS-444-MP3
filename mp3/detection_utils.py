@@ -83,6 +83,42 @@ def compute_targets(anchor, cls, bbox):
     """
     # TODO(student): Complete this function
     
+    B, A, _ = anchor.shape
+    device = anchor.device
+
+    gt_clss = torch.zeros(B, A, 1, dtype=torch.long, device=device)
+    gt_bboxes = torch.zeros(B, A, 4, device=device)
+
+    for b in range(B):
+        anchors_per_image = anchor[b]  # (A, 4)
+        cls_per_image = cls[b].to(torch.long)  # (num_objs, 1)
+        bbox_per_image = bbox[b]  # (num_objs, 4)
+
+        if bbox_per_image.shape[0] == 0:
+            # 如果图像中没有目标
+            max_iou = torch.zeros(A, device=device)
+            max_idx = torch.zeros(A, dtype=torch.long, device=device)
+        else:
+            # 计算每个锚点与真实边界框的IoU
+            iou = compute_bbox_iou(anchors_per_image, bbox_per_image)  # (A, num_objs)
+            max_iou, max_idx = torch.max(iou, dim=1)  # (A,), (A,)
+
+        # 创建掩码
+        mask_bg = max_iou < 0.4
+        mask_ignore = (max_iou >= 0.4) & (max_iou < 0.5)
+        mask_fg = max_iou >= 0.5
+
+        # 背景锚点，类别设为0
+        gt_clss[b][mask_bg] = 0
+
+        # 忽略的锚点，类别设为-1
+        gt_clss[b][mask_ignore] = -1
+
+        if bbox_per_image.shape[0] > 0:
+            # 前景锚点，设置类别和边界框
+            gt_clss[b][mask_fg] = cls_per_image[max_idx[mask_fg]]
+            gt_bboxes[b][mask_fg] = bbox_per_image[max_idx[mask_fg]]
+
     return gt_clss.to(torch.int), gt_bboxes
 
 def compute_bbox_targets(anchors, gt_bboxes):
@@ -110,7 +146,32 @@ def compute_bbox_targets(anchors, gt_bboxes):
     """
     # TODO(student): Complete this function
 
-    return torch.stack([delta_x, delta_y, delta_w, delta_h], dim=-1)
+    # 锚点框的中心和尺寸
+    anchor_center_x = (anchors[:, 0] + anchors[:, 2]) / 2.0
+    anchor_center_y = (anchors[:, 1] + anchors[:, 3]) / 2.0
+    anchor_width = anchors[:, 2] - anchors[:, 0]
+    anchor_height = anchors[:, 3] - anchors[:, 1]
+
+    # 真实边界框的中心和尺寸
+    gt_center_x = (gt_bboxes[:, 0] + gt_bboxes[:, 2]) / 2.0
+    gt_center_y = (gt_bboxes[:, 1] + gt_bboxes[:, 3]) / 2.0
+    gt_width = gt_bboxes[:, 2] - gt_bboxes[:, 0]
+    gt_height = gt_bboxes[:, 3] - gt_bboxes[:, 1]
+
+    # 计算回归目标
+    delta_x = (gt_center_x - anchor_center_x) / anchor_width
+    delta_y = (gt_center_y - anchor_center_y) / anchor_height
+
+    # 防止宽度和高度过小导致数值不稳定
+    gt_width = torch.clamp(gt_width, min=1.0)
+    gt_height = torch.clamp(gt_height, min=1.0)
+
+    delta_w = torch.log(gt_width / anchor_width)
+    delta_h = torch.log(gt_height / anchor_height)
+
+    bbox_reg_target = torch.stack([delta_x, delta_y, delta_w, delta_h], dim=-1)
+
+    return bbox_reg_target
 
 def apply_bbox_deltas(boxes, deltas):
     """
@@ -122,6 +183,32 @@ def apply_bbox_deltas(boxes, deltas):
         
     """
     # TODO(student): Complete this function
+    # 锚点框的中心和尺寸
+    anchor_center_x = (boxes[:, 0] + boxes[:, 2]) / 2.0
+    anchor_center_y = (boxes[:, 1] + boxes[:, 3]) / 2.0
+    anchor_width = boxes[:, 2] - boxes[:, 0]
+    anchor_height = boxes[:, 3] - boxes[:, 1]
+
+    # 提取偏移量
+    delta_x = deltas[:, 0]
+    delta_y = deltas[:, 1]
+    delta_w = deltas[:, 2]
+    delta_h = deltas[:, 3]
+
+    # 计算新的中心和尺寸
+    pred_center_x = delta_x * anchor_width + anchor_center_x
+    pred_center_y = delta_y * anchor_height + anchor_center_y
+    pred_width = anchor_width * torch.exp(delta_w)
+    pred_height = anchor_height * torch.exp(delta_h)
+
+    # 计算新的边界框坐标
+    x1 = pred_center_x - pred_width / 2.0
+    y1 = pred_center_y - pred_height / 2.0
+    x2 = pred_center_x + pred_width / 2.0
+    y2 = pred_center_y + pred_height / 2.0
+
+    new_boxes = torch.stack([x1, y1, x2, y2], dim=-1)
+
     return new_boxes
 
 def nms(bboxes, scores, threshold=0.5):
@@ -141,3 +228,25 @@ def nms(bboxes, scores, threshold=0.5):
     make sure that the indices tensor that you return is of type int or long(since it will be used as an index to select the relevant bboxes to output)
     """
     # TODO(student): Complete this function
+    scores, idxs = scores.sort(descending=True)
+    bboxes = bboxes[idxs]
+
+    keep = []
+
+    while idxs.numel() > 0:
+        i = idxs[0].item()
+        keep.append(i)
+
+        if idxs.numel() == 1:
+            break
+
+        # 计算当前框与剩余框的IoU
+        ious = compute_bbox_iou(bboxes[0].unsqueeze(0), bboxes[1:])[0]
+
+        # 保留IoU小于阈值的框
+        idxs = idxs[1:][ious <= threshold]
+        bboxes = bboxes[1:][ious <= threshold]
+
+    keep = torch.tensor(keep, dtype=torch.long, device=bboxes.device)
+
+    return keep
