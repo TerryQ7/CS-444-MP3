@@ -161,7 +161,7 @@ class CocoDataset(Dataset):
             is_crowd: (N) tensor of booleans indicating whether the bounding box is a crowd
         """
         image, bboxes, cls, is_crowd, image_id, resize_factor = self._get_annotation(index)
-        f self.split == 'train' and self.augment is not None:
+        if self.split == 'train' and self.augment is not None:
         image, bboxes, cls, is_crowd, image_id = self.augment([image, bboxes, cls, is_crowd, image_id])
 
         # 应用 transform（Normalizer 和 Resizer）
