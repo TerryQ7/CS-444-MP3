@@ -162,7 +162,7 @@ class CocoDataset(Dataset):
         """
         image, bboxes, cls, is_crowd, image_id, resize_factor = self._get_annotation(index)
         if self.split == 'train' and self.augment is not None:
-        image, bboxes, cls, is_crowd, image_id = self.augment([image, bboxes, cls, is_crowd, image_id])
+            image, bboxes, cls, is_crowd, image_id = self.augment([image, bboxes, cls, is_crowd, image_id])
 
         # 应用 transform（Normalizer 和 Resizer）
         if self.transform:
