@@ -88,7 +88,8 @@ def main(_):
                                 weight_decay=FLAGS.weight_decay)
     
     warmup_iters = 2000
-    warmup_scheduler = LinearLR(optimizer, start_factor=0.0, end_factor=1.0, total_iters=warmup_iters)
+    warmup_scheduler = LinearLR(optimizer, start_factor=1e-5, end_factor=1.0, total_iters=warmup_iters)
+
     
     milestones = [int(x) for x in FLAGS.lr_step]
     main_scheduler = torch.optim.lr_scheduler.MultiStepLR(
